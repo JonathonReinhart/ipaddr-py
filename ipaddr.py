@@ -20,7 +20,7 @@ This library is used to create/poke/manipulate IPv4 and IPv6 addresses and
 prefixes.
 """
 
-__version__ = '1.0.1'
+__version__ = '1.0.0'
 
 
 class Error(Exception):
