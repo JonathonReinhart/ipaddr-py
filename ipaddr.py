@@ -405,8 +405,16 @@ class BaseNet(IPAddrBase):
         return hash(self._ip ^ int(self.netmask))
 
     def __contains__(self, other):
-        return (int(self.network) <= int(other._ip) and
-                int(self.broadcast) >= int(other.broadcast))
+        # Easy case, dealing with networks.
+        if isinstance(other, BaseNet):
+            return (int(self.network) <= int(other._ip) and
+                    int(self.broadcast) >= int(other.broadcast))
+        elif isinstance(other, BaseIP):
+            # Check if we've got an Address
+            return (int(self.network) <= int(other._ip) <=
+                    int(self.broadcast))
+        else:
+            return IP(other) in self
 
     @property
     def network(self):
