@@ -22,7 +22,7 @@ and networks.
 
 """
 
-__version__ = 'trunk'
+__version__ = '2.1.2'
 
 import struct
 
@@ -44,7 +44,7 @@ def IPAddress(address, version=None):
           be considered to be IPv4 by default.
         version: An Integer, 4 or 6. If set, don't try to automatically
           determine what the IP address type is. important for things
-          like IPAddress(1), which could be IPv4, '0.0.0.0.1',  or IPv6,
+          like IPAddress(1), which could be IPv4, '0.0.0.1',  or IPv6,
           '::1'.
 
     Returns:
@@ -198,7 +198,7 @@ def summarize_address_range(first, last):
         raise TypeError('first and last must be IP addresses, not networks')
     if first.version != last.version:
         raise TypeError("%s and %s are not of the same version" % (
-                str(self), str(other)))        
+                str(self), str(other)))
     if first > last:
         raise ValueError('last IP address must be greater than first')
 
@@ -356,7 +356,7 @@ def get_mixed_type_key(obj):
     doesn't make any sense.  There are some times however, where you may wish
     to have ipaddr sort these for you anyway. If you need to do this, you
     can use this function as the key= argument to sorted().
-    
+
     Args:
       obj: either a Network or Address object.
     Returns:
@@ -409,7 +409,8 @@ class _BaseIP(_IPAddrBase):
     def __eq__(self, other):
         try:
             return (self._ip == other._ip
-                    and self._version == other._version)
+                    and self._version == other._version
+                    and isinstance(other, _BaseIP))
         except AttributeError:
             return NotImplemented
 
@@ -452,6 +453,18 @@ class _BaseIP(_IPAddrBase):
         if self._ip != other._ip:
             return self._ip > other._ip
         return False
+
+    # Shorthand for Integer addition and subtraction. This is not
+    # meant to ever support addition/subtraction of addresses.
+    def __add__(self, other):
+        if not isinstance(other, int):
+            return NotImplemented
+        return IPAddress(int(self) + other, version=self._version)
+
+    def __sub__(self, other):
+        if not isinstance(other, int):
+            return NotImplemented
+        return IPAddress(int(self) - other, version=self._version)
 
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, str(self))
@@ -672,7 +685,7 @@ class _BaseNet(_IPAddrBase):
 
         Raises:
             TypeError: If self and other are of difffering address
-              versions.
+              versions, or if other is not a network object.
             ValueError: If other is not completely contained by self.
 
         """
@@ -680,9 +693,15 @@ class _BaseNet(_IPAddrBase):
             raise TypeError("%s and %s are not of the same version" % (
                 str(self), str(other)))
 
+        if not isinstance(other, _BaseNet):
+            raise TypeError("%s is not a network object" % str(other))
+
         if other not in self:
             raise ValueError('%s not contained in %s' % (str(other),
                                                          str(self)))
+        if other == self:
+            return []
+
         ret_addrs = []
 
         # Make sure we're comparing the network of other.
@@ -884,6 +903,11 @@ class _BaseNet(_IPAddrBase):
 
             yield current
 
+    def masked(self):
+        """Return the network object with the host bits masked out."""
+        return IPNetwork('%s/%d' % (self.network, self._prefixlen),
+                         version=self._version)
+            
     def subnet(self, prefixlen_diff=1, new_prefix=None):
         """Return a list of subnets, rather than an interator."""
         return list(self.iter_subnets(prefixlen_diff, new_prefix))
@@ -1624,7 +1648,7 @@ class _BaseV6(object):
             RFC 2373 2.5.2.
 
         """
-        return self == IPv6Network('::')
+        return (self == IPv6Network('::') or self == IPv6Address('::'))
 
     @property
     def is_loopback(self):
@@ -1635,7 +1659,7 @@ class _BaseV6(object):
             RFC 2373 2.5.3.
 
         """
-        return self == IPv6Network('::1')
+        return (self == IPv6Network('::1') or self == IPv6Address('::1'))
 
     @property
     def is_link_local(self):
@@ -1852,3 +1876,7 @@ class IPv6Network(_BaseV6, _BaseNet):
         except ValueError:
             return False
         return 0 <= prefixlen <= 128
+
+    @property
+    def with_netmask(self):
+        return self.with_prefixlen
