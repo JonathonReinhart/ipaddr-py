@@ -22,7 +22,7 @@ and networks.
 
 """
 
-__version__ = '2.1.5'
+__version__ = '2.1.6'
 
 import struct
 
@@ -117,6 +117,36 @@ def IPNetwork(address, version=None, strict=False):
 
     raise ValueError('%r does not appear to be an IPv4 or IPv6 network' %
                      address)
+
+
+def v4_int_to_packed(address):
+    """The binary representation of this address.
+
+    Args:
+        address: An integer representation of an IPv4 IP address.
+
+    Returns:
+        The binary representation of this address.
+
+    Raises:
+        ValueError: If the integer is too large to be an IPv4 IP
+          address.
+    """
+    if address > _BaseV4._ALL_ONES:
+        raise ValueError('Address too large for IPv4')
+    return struct.pack('!I', address)
+
+
+def v6_int_to_packed(address):
+    """The binary representation of this address.
+
+    Args:
+        address: An integer representation of an IPv4 IP address.
+
+    Returns:
+        The binary representation of this address.
+    """
+    return struct.pack('!QQ', address >> 64, address & (2**64 - 1))
 
 
 def _find_address_range(addresses):
@@ -476,7 +506,7 @@ class _BaseIP(_IPAddrBase):
         return  '%s' % self._string_from_ip_int(self._ip)
 
     def __hash__(self):
-        return hash(hex(self._ip))
+        return hash(hex(long(self._ip)))
 
     def _get_address_key(self):
         return (self._version, self)
@@ -915,7 +945,7 @@ class _BaseNet(_IPAddrBase):
                          version=self._version)
 
     def subnet(self, prefixlen_diff=1, new_prefix=None):
-        """Return a list of subnets, rather than an interator."""
+        """Return a list of subnets, rather than an iterator."""
         return list(self.iter_subnets(prefixlen_diff, new_prefix))
 
     def supernet(self, prefixlen_diff=1, new_prefix=None):
@@ -1065,7 +1095,7 @@ class _BaseV4(object):
     @property
     def packed(self):
         """The binary representation of this address."""
-        return struct.pack('!I', self._ip)
+        return v4_int_to_packed(self._ip)
 
     @property
     def version(self):
@@ -1394,10 +1424,9 @@ class _BaseV6(object):
 
         ip_int = 0
 
-        fields = self._explode_shorthand_ip_string(ip_str).split(':')
-
         # Do we have an IPv4 mapped (::ffff:a.b.c.d) or compact (::a.b.c.d)
         # ip_str?
+        fields = ip_str.split(':')
         if fields[-1].count('.') == 3:
             ipv4_string = fields.pop()
             ipv4_int = IPv4Network(ipv4_string)._ip
@@ -1406,7 +1435,9 @@ class _BaseV6(object):
                 octets.append(hex(ipv4_int & 0xFFFF).lstrip('0x').rstrip('L'))
                 ipv4_int >>= 16
             fields.extend(reversed(octets))
+            ip_str = ':'.join(fields)
 
+        fields = self._explode_shorthand_ip_string(ip_str).split(':')
         for field in fields:
             try:
                 ip_int = (ip_int << 16) + int(field or '0', 16)
@@ -1603,7 +1634,7 @@ class _BaseV6(object):
     @property
     def packed(self):
         """The binary representation of this address."""
-        return struct.pack('!QQ', self._ip >> 64, self._ip & (2**64 - 1))
+        return v6_int_to_packed(self._ip)
 
     @property
     def version(self):
@@ -1717,6 +1748,34 @@ class _BaseV6(object):
             return IPv4Address(int('%s%s' % (hextets[-2], hextets[-1]), 16))
         except AddressValueError:
             return None
+
+    def teredo(self):
+        """Tuple of embedded teredo IPs.
+
+        Returns:
+            Tuple of the (server, client) IPs or False if the address
+            doesn't appear to be a teredo address (doesn't start with
+            2001)
+
+        """
+        bits = self._explode_shorthand_ip_string().split(':')
+        if not bits[0] == '2001':
+            return False
+        return (IPv4Address(int(''.join(bits[2:4]), 16)),
+                IPv4Address(int(''.join(bits[6:]), 16) ^ 0xFFFFFFFF))
+
+    def sixtofour(self):
+        """Return the IPv4 6to4 embedded address.
+
+        Returns:
+            The IPv4 6to4-embedded address if present or False if the
+            address doesn't appear to contain a 6to4 embedded address.
+
+        """
+        bits = self._explode_shorthand_ip_string().split(':')
+        if not bits[0] == '2002':
+            return False
+        return IPv4Address(int(''.join(bits[1:3]), 16))
 
 
 class IPv6Address(_BaseV6, _BaseIP):
@@ -1867,7 +1926,6 @@ class IPv6Network(_BaseV6, _BaseNet):
             if self.ip != self.network:
                 raise ValueError('%s has host bits set' %
                                  self.ip)
-
 
     def _is_valid_netmask(self, prefixlen):
         """Verify that the netmask/prefixlen is valid.
